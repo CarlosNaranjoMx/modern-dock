@@ -20,6 +20,7 @@ import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ColorPicker;
@@ -28,6 +29,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Tab;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.stage.DirectoryChooser;
@@ -36,10 +38,15 @@ import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
 import javafx.util.StringConverter;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import static com.github.arthurdeka.cedromoderndock.util.UIUtils.setStageIcon;
@@ -47,6 +54,46 @@ import static com.github.arthurdeka.cedromoderndock.util.UIUtils.setStageIcon;
 public class SettingsController {
     private static final double LIST_VIEW_CELL_HEIGHT = 40;
     private static final double LIST_VIEW_MAX_HEIGHT = 200;
+
+    // PowerShell helper for "Add Link": resolves Edge, downloads the site favicon, wraps it as an
+    // .ico and creates a browser web-app .lnk. Inputs arrive via the CMDDOCK_* environment variables.
+    private static final String WEB_APP_SHORTCUT_SCRIPT = """
+            $ErrorActionPreference = 'Stop'
+            $name = $env:CMDDOCK_NAME
+            $url  = $env:CMDDOCK_URL
+            $edge = @("${env:ProgramFiles(x86)}/Microsoft/Edge/Application/msedge.exe", "$env:ProgramFiles/Microsoft/Edge/Application/msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $edge) { $c = Get-Command msedge.exe -ErrorAction SilentlyContinue; if ($c) { $edge = $c.Source } }
+            if (-not $edge) { exit 1 }
+            $edge = [System.IO.Path]::GetFullPath($edge)
+            $webDir = Join-Path $env:APPDATA 'CedroModernDock/webApps'
+            $icoDir = Join-Path $webDir 'icons'
+            New-Item -ItemType Directory -Force -Path $icoDir | Out-Null
+            $safe = ($name -replace '[^A-Za-z0-9 ._-]', '_').Trim()
+            if (-not $safe) { $safe = 'link' }
+            $png = [System.IO.Path]::GetFullPath((Join-Path $icoDir ($safe + '.png')))
+            $ico = [System.IO.Path]::GetFullPath((Join-Path $icoDir ($safe + '.ico')))
+            $lnk = [System.IO.Path]::GetFullPath((Join-Path $webDir ($safe + '.lnk')))
+            $domain = ([Uri]$url).Host
+            try {
+              Invoke-WebRequest "https://www.google.com/s2/favicons?domain=$domain&sz=256" -OutFile $png -UseBasicParsing
+              $b = [System.IO.File]::ReadAllBytes($png)
+              $ms = New-Object System.IO.MemoryStream
+              $bw = New-Object System.IO.BinaryWriter($ms)
+              $bw.Write([UInt16]0); $bw.Write([UInt16]1); $bw.Write([UInt16]1)
+              $bw.Write([Byte]0); $bw.Write([Byte]0); $bw.Write([Byte]0); $bw.Write([Byte]0)
+              $bw.Write([UInt16]1); $bw.Write([UInt16]32)
+              $bw.Write([UInt32]$b.Length); $bw.Write([UInt32]22)
+              $bw.Write($b); $bw.Flush()
+              [System.IO.File]::WriteAllBytes($ico, $ms.ToArray())
+            } catch { }
+            $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+            $s.TargetPath = $edge
+            $s.Arguments = "--app=$url"
+            if (Test-Path $ico) { $s.IconLocation = "$ico,0" }
+            $s.WorkingDirectory = Split-Path $edge
+            $s.Save()
+            Write-Output $lnk
+            """;
 
     @FXML
     private Label mainTitleLabel;
@@ -485,6 +532,110 @@ public class SettingsController {
 
         addDockItemsToListView(appServices.dockService().getItems());
         dockRefreshAction.run();
+    }
+
+    @FXML
+    private void handleAddLink() {
+        Optional<String> urlResult = promptText("Add Link",
+                "Add a website as a dock item (opens as an app window).", "URL:", "https://");
+        if (urlResult.isEmpty()) {
+            return;
+        }
+        String url = urlResult.get().trim();
+        if (url.isEmpty()) {
+            return;
+        }
+        if (!url.matches("(?i)^https?://.*")) {
+            url = "https://" + url;
+        }
+
+        String defaultName = deriveLinkName(url);
+        Optional<String> nameResult = promptText("Add Link", "Name shown on the dock", "Name:", defaultName);
+        if (nameResult.isEmpty()) {
+            return;
+        }
+        String name = nameResult.get().trim();
+        if (name.isEmpty()) {
+            name = defaultName;
+        }
+
+        try {
+            Path shortcut = createWebAppShortcut(name, url);
+            if (shortcut == null || Files.notExists(shortcut)) {
+                showError("Could not create the link. Make sure Microsoft Edge is installed.");
+                return;
+            }
+            appServices.iconGateway().cacheProgramIcon(shortcut.toString());
+            DockItem newItem = new DockProgramItemModel(name, shortcut.toString());
+            appServices.dockService().addItem(newItem);
+            Logger.info("[listView] Link added: " + name + " -> " + url);
+        } catch (Exception e) {
+            Logger.error("Failed to add link: " + e.getMessage());
+            showError("Failed to add link: " + e.getMessage());
+        }
+
+        addDockItemsToListView(appServices.dockService().getItems());
+        dockRefreshAction.run();
+    }
+
+    private Optional<String> promptText(String title, String header, String content, String defaultValue) {
+        TextInputDialog dialog = new TextInputDialog(defaultValue);
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+        dialog.setContentText(content);
+        return dialog.showAndWait();
+    }
+
+    private String deriveLinkName(String url) {
+        try {
+            String host = java.net.URI.create(url).getHost();
+            if (host == null || host.isBlank()) {
+                return "Link";
+            }
+            host = host.replaceFirst("^www\\.", "");
+            String firstLabel = host.split("\\.")[0];
+            if (firstLabel.isBlank()) {
+                return host;
+            }
+            return Character.toUpperCase(firstLabel.charAt(0)) + firstLabel.substring(1);
+        } catch (Exception e) {
+            return "Link";
+        }
+    }
+
+    // Generates a browser "web app" shortcut (.lnk) with the site's favicon as icon, reusing the
+    // dock's .lnk support. A short PowerShell helper does the work; inputs are passed via environment
+    // variables to avoid any quoting/injection issues. Returns the created .lnk path, or null.
+    private Path createWebAppShortcut(String name, String url) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(
+                "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-Command", WEB_APP_SHORTCUT_SCRIPT
+        );
+        pb.environment().put("CMDDOCK_NAME", name);
+        pb.environment().put("CMDDOCK_URL", url);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+
+        String lastLine = null;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty()) {
+                    lastLine = line;
+                }
+            }
+        }
+        process.waitFor();
+
+        return lastLine == null ? null : Path.of(lastLine);
+    }
+
+    private void showError(String message) {
+        Alert alert = new Alert(Alert.AlertType.ERROR, message);
+        alert.setHeaderText(null);
+        alert.showAndWait();
     }
 
     @FXML

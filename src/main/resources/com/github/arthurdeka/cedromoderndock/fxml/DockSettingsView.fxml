@@ -68,6 +68,7 @@
                                           <Label fx:id="actionsHelperLabel" styleClass="section-helper" text="Add custom executables, include native Windows modules or remove the selected item." wrapText="true" />
                                           <Button fx:id="addProgramButton" maxWidth="Infinity" mnemonicParsing="false" onAction="#handleAddProgram" text="Add Program" />
                                           <Button fx:id="addFolderButton" maxWidth="Infinity" mnemonicParsing="false" onAction="#handleAddFolder" text="Add Folder" />
+                                          <Button fx:id="addLinkButton" maxWidth="Infinity" mnemonicParsing="false" onAction="#handleAddLink" text="Add Link" />
                                           <Button fx:id="addWindowsModuleButton" maxWidth="Infinity" mnemonicParsing="false" onAction="#openAddWindowsModuleWindow" styleClass="secondary-button" text="Add Windows Module" />
                                           <Region VBox.vgrow="ALWAYS" />
                                           <Button fx:id="removeProgramButton" disable="true" maxWidth="Infinity" mnemonicParsing="false" onAction="#handleRemoveProgram" styleClass="secondary-button" text="Remove Selected Item" />
