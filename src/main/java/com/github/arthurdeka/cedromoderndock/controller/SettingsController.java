@@ -444,17 +444,19 @@ public class SettingsController {
                 new FileChooser.ExtensionFilter(text("dialog.fileChooser.executableFilter"), "*.exe")
         );
 
-        File file = fileChooser.showOpenDialog(null);
-        if (file != null) {
-            ProgramSelectionResolver.ResolvedProgramSelection selection =
-                    ProgramSelectionResolver.resolve(Path.of(file.getAbsolutePath()));
-            String selectedExePath = selection.executablePath();
-            String selectedExeName = selection.label();
+        List<File> files = fileChooser.showOpenMultipleDialog(null);
+        if (files != null) {
+            for (File file : files) {
+                ProgramSelectionResolver.ResolvedProgramSelection selection =
+                        ProgramSelectionResolver.resolve(Path.of(file.getAbsolutePath()));
+                String selectedExePath = selection.executablePath();
+                String selectedExeName = selection.label();
 
-            appServices.iconGateway().cacheProgramIcon(selectedExePath);
-            DockItem newItem = new DockProgramItemModel(selectedExeName, selectedExePath);
-            appServices.dockService().addItem(newItem);
-            Logger.info("[listView] Program added: " + selectedExeName);
+                appServices.iconGateway().cacheProgramIcon(selectedExePath);
+                DockItem newItem = new DockProgramItemModel(selectedExeName, selectedExePath);
+                appServices.dockService().addItem(newItem);
+                Logger.info("[listView] Program added: " + selectedExeName);
+            }
         }
 
         addDockItemsToListView(appServices.dockService().getItems());
