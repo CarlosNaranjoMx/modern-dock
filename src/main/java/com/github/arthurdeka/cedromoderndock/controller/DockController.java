@@ -218,7 +218,13 @@ public class DockController {
             // Logic for DockProgramItemModel runs on a background thread.
             Path iconPath = appServices.iconGateway().resolveProgramIcon(programItem.getExecutablePath());
 
-            // if file does not exist
+            // Cache the icon on demand (e.g. items imported via config.json never went through "Add program").
+            if (iconPath == null || Files.notExists(iconPath)) {
+                appServices.iconGateway().cacheProgramIcon(programItem.getExecutablePath());
+                iconPath = appServices.iconGateway().resolveProgramIcon(programItem.getExecutablePath());
+            }
+
+            // if file still does not exist
             if (iconPath == null || Files.notExists(iconPath)) {
                 Logger.error("DockController - createButton - path for cached icon not found");
                 return null;
