@@ -46,6 +46,15 @@ public class DockService {
         saveChanges();
     }
 
+    public boolean isAlwaysOnTop() {
+        return dock.isAlwaysOnTop();
+    }
+
+    public void setAlwaysOnTop(boolean alwaysOnTop) {
+        dock.setAlwaysOnTop(alwaysOnTop);
+        saveChanges();
+    }
+
     public void saveChanges() {
         repository.save(dock);
     }

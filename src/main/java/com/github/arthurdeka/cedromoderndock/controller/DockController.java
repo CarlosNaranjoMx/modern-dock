@@ -30,6 +30,7 @@ import javafx.scene.layout.VBox;
 import javafx.geometry.Pos;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 
@@ -114,6 +115,10 @@ public class DockController {
             }
         });
 
+        if (stage != null) {
+            stage.setAlwaysOnTop(appServices.dockService().isAlwaysOnTop());
+        }
+
         enableDrag();
         updateDockUI();
         startOpenStateWatcher();
@@ -177,8 +182,9 @@ public class DockController {
         hBoxContainer.setSpacing(getDockIconsSpacing());
         hBoxContainer.setStyle("-fx-background-color: rgba(" + dock.getDockColorRGB() + " " + dock.getDockTransparency() + ");" + "-fx-background-radius: " + dock.getDockBorderRounding() + ";");
 
-        // Always-visible control to cycle the 3-state filter (all / running / not-running).
+        // Always-visible controls: cycle the 3-state filter, and toggle always-on-top.
         hBoxContainer.getChildren().add(createFilterToggleButton());
+        hBoxContainer.getChildren().add(createAlwaysOnTopButton());
 
         for (DockItem item : dock.getItems()) {
             Button button = createButton(item);
@@ -387,6 +393,35 @@ public class DockController {
         // Collapse/expand the dock to fit the now-visible buttons.
         stage.sizeToScene();
         appServices.positioningService().applyPosition(stage);
+    }
+
+    /* Builds the button that keeps the dock above all other windows (always-on-top). */
+    private Button createAlwaysOnTopButton() {
+        Button button = new Button();
+        button.getStyleClass().add("dock-button");
+        applyAlwaysOnTopGraphic(button);
+        button.setOnAction(e -> {
+            boolean newValue = !appServices.dockService().isAlwaysOnTop();
+            appServices.dockService().setAlwaysOnTop(newValue);
+            if (stage != null) {
+                stage.setAlwaysOnTop(newValue);
+            }
+            applyAlwaysOnTopGraphic(button);
+        });
+        return button;
+    }
+
+    /* Up-pointing pin: filled when always-on-top is enabled, hollow when disabled. */
+    private void applyAlwaysOnTopGraphic(Button button) {
+        boolean enabled = appServices.dockService().isAlwaysOnTop();
+        double size = Math.max(10.0, appServices.appearanceService().getIconsSize() * 0.8);
+        Polygon pin = new Polygon(size / 2.0, 0.0, size, size, 0.0, size);
+        pin.setStroke(Color.WHITE);
+        pin.setStrokeWidth(1.5);
+        pin.setFill(enabled ? Color.web("#ffcc33") : Color.TRANSPARENT);
+        pin.setMouseTransparent(true);
+        button.setGraphic(pin);
+        button.setTooltip(new Tooltip(enabled ? "Siempre encima: activado" : "Siempre encima: desactivado"));
     }
 
     private enum DockFilterState {
