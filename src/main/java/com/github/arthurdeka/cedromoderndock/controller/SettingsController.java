@@ -92,7 +92,7 @@ public class SettingsController {
             if (Test-Path $ico) { $s.IconLocation = "$ico,0" }
             $s.WorkingDirectory = Split-Path $edge
             $s.Save()
-            Write-Output $lnk
+            Write-Output "LNK::$lnk"
             """;
 
     @FXML
@@ -607,29 +607,38 @@ public class SettingsController {
     // dock's .lnk support. A short PowerShell helper does the work; inputs are passed via environment
     // variables to avoid any quoting/injection issues. Returns the created .lnk path, or null.
     private Path createWebAppShortcut(String name, String url) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(
-                "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                "-Command", WEB_APP_SHORTCUT_SCRIPT
-        );
-        pb.environment().put("CMDDOCK_NAME", name);
-        pb.environment().put("CMDDOCK_URL", url);
-        pb.redirectErrorStream(true);
-        Process process = pb.start();
+        // Run the helper from a temp .ps1 file (not -Command) so PowerShell parses the script
+        // verbatim; passing it inline would let ProcessBuilder escape the script's quotes as \"
+        // and corrupt it. The result path is marked with an LNK:: prefix to ignore any warnings.
+        Path scriptFile = Files.createTempFile("cmddock-addlink", ".ps1");
+        try {
+            Files.writeString(scriptFile, WEB_APP_SHORTCUT_SCRIPT);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                    "-File", scriptFile.toString()
+            );
+            pb.environment().put("CMDDOCK_NAME", name);
+            pb.environment().put("CMDDOCK_URL", url);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
 
-        String lastLine = null;
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (!line.isEmpty()) {
-                    lastLine = line;
+            String result = null;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("LNK::")) {
+                        result = line.substring("LNK::".length()).trim();
+                    }
                 }
             }
-        }
-        process.waitFor();
+            process.waitFor();
 
-        return lastLine == null ? null : Path.of(lastLine);
+            return (result == null || result.isEmpty()) ? null : Path.of(result);
+        } finally {
+            Files.deleteIfExists(scriptFile);
+        }
     }
 
     private void showError(String message) {
