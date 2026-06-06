@@ -20,7 +20,11 @@ public class DefaultProgramLauncher implements ProgramLauncher {
         }
 
         try {
-            executeAndHandleElevation(executablePath, label);
+            if (executablePath.trim().toLowerCase(Locale.ROOT).endsWith(".lnk")) {
+                launchShortcut(executablePath, label);
+            } else {
+                executeAndHandleElevation(executablePath, label);
+            }
         } catch (IOException e) {
             Logger.error("Failed to open: " + label);
             Logger.error("Path: " + executablePath);
@@ -29,6 +33,14 @@ public class DefaultProgramLauncher implements ProgramLauncher {
             Logger.error("Process interrupted: " + e.getMessage());
             throw new RuntimeException(e);
         }
+    }
+
+    // Shortcuts can encode a target, arguments, working dir and icon (e.g. browser web apps,
+    // UWP/AppsFolder apps). They cannot be run directly by ProcessBuilder, so launch via the shell.
+    private void launchShortcut(String shortcutPath, String label) throws IOException {
+        Path normalizedPath = Path.of(shortcutPath).toAbsolutePath().normalize();
+        new ProcessBuilder("cmd.exe", "/c", "start", "", normalizedPath.toString()).start();
+        Logger.info("Executing shortcut: " + label);
     }
 
     private void executeAndHandleElevation(String path, String label) throws IOException, InterruptedException {

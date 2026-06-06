@@ -441,7 +441,7 @@ public class SettingsController {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle(text("dialog.fileChooser.executableTitle"));
         fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter(text("dialog.fileChooser.executableFilter"), "*.exe")
+                new FileChooser.ExtensionFilter(text("dialog.fileChooser.executableFilter"), "*.exe", "*.lnk")
         );
 
         List<File> files = fileChooser.showOpenMultipleDialog(null);

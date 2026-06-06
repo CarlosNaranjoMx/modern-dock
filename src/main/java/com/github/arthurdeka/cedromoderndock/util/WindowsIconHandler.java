@@ -153,7 +153,16 @@ public final class WindowsIconHandler {
                 return cachedIconPath;
             }
 
-            if (!extractIconWithShellApi(exePath, cachedIconPath)) {
+            boolean extracted;
+            if (exePath.toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) {
+                // Shortcuts (.lnk) resolve their displayed icon via the shell system image list,
+                // not via PrivateExtractIcons (which would only see the generic shortcut icon).
+                extracted = extractIconViaSystemImageList(exePath, 0, cachedIconPath);
+            } else {
+                extracted = extractIconWithShellApi(exePath, cachedIconPath);
+            }
+
+            if (!extracted) {
                 Logger.error("Failed to extract icon for " + exePath + " using Shell API.");
                 Files.deleteIfExists(cachedIconPath); // Clean up empty or corrupted file
                 return null;
@@ -169,10 +178,28 @@ public final class WindowsIconHandler {
     }
 
     private static BufferedImage extractFolderIconWithShellApi(File folder) {
+        return iconImageFromSystemImageList(folder.getAbsolutePath(), FILE_ATTRIBUTE_DIRECTORY);
+    }
+
+    /**
+     * Extracts the shell-resolved icon for any path (shortcut, folder, etc.) via the system
+     * jumbo image list and writes it as PNG. Used for .lnk shortcuts whose real icon is only
+     * known to the shell.
+     */
+    private static boolean extractIconViaSystemImageList(String path, int dwFileAttributes, Path outputPath) throws IOException {
+        BufferedImage image = iconImageFromSystemImageList(path, dwFileAttributes);
+        if (image == null) {
+            return false;
+        }
+        ImageIO.write(image, "png", outputPath.toFile());
+        return Files.exists(outputPath) && Files.size(outputPath) > 0;
+    }
+
+    private static BufferedImage iconImageFromSystemImageList(String path, int dwFileAttributes) {
         SHFILEINFO shFileInfo = new SHFILEINFO();
         long result = Shell32Ex.INSTANCE.SHGetFileInfoW(
-                folder.getAbsolutePath(),
-                FILE_ATTRIBUTE_DIRECTORY,
+                path,
+                dwFileAttributes,
                 shFileInfo,
                 shFileInfo.size(),
                 SHGFI_SYSICONINDEX
