@@ -75,8 +75,33 @@ public class SettingsController {
             $lnk = [System.IO.Path]::GetFullPath((Join-Path $webDir ($safe + '.lnk')))
             $domain = ([Uri]$url).Host
             try {
-              Invoke-WebRequest "https://www.google.com/s2/favicons?domain=$domain&sz=256" -OutFile $png -UseBasicParsing
-              $b = [System.IO.File]::ReadAllBytes($png)
+              Add-Type -AssemblyName System.Drawing
+              $img = $null
+              try {
+                Invoke-WebRequest "https://www.google.com/s2/favicons?domain=$domain&sz=256" -OutFile $png -UseBasicParsing
+                $img = [System.Drawing.Image]::FromFile($png)
+              } catch {
+                # google has no favicon for some domains (e.g. web.whatsapp.com); use the site's own favicon.ico
+                $raw = "$png.raw.ico"
+                Invoke-WebRequest "https://$domain/favicon.ico" -OutFile $raw -UseBasicParsing
+                $icoSrc = New-Object System.Drawing.Icon($raw, 256, 256)
+                $img = $icoSrc.ToBitmap()
+                $icoSrc.Dispose()
+                Remove-Item $raw -Force
+              }
+              # Re-render to a true 256x256 PNG so the ICO header below matches the real pixel size.
+              # Favicons can come back at 16/32px; declaring 256 for a 32px image makes the shell
+              # reject the icon and the dock shows a blank document instead.
+              $bmp = New-Object System.Drawing.Bitmap 256, 256
+              $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+              $gfx.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+              $gfx.DrawImage($img, 0, 0, 256, 256)
+              $gfx.Dispose(); $img.Dispose()
+              $msPng = New-Object System.IO.MemoryStream
+              $bmp.Save($msPng, [System.Drawing.Imaging.ImageFormat]::Png)
+              $bmp.Dispose()
+              $b = $msPng.ToArray()
+              [System.IO.File]::WriteAllBytes($png, $b)
               $ms = New-Object System.IO.MemoryStream
               $bw = New-Object System.IO.BinaryWriter($ms)
               $bw.Write([UInt16]0); $bw.Write([UInt16]1); $bw.Write([UInt16]1)

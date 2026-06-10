@@ -6,6 +6,7 @@ import com.sun.jna.platform.win32.WinDef.HWND;
 import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.ptr.IntByReference;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -30,6 +31,13 @@ public class NativeWindowUtils {
 
         // Normalize the target executable path so comparisons are stable.
         final Path shortcutOrExePath = Paths.get(executablePath).toAbsolutePath().normalize();
+
+        // Folder dock items pass their directory path here: they are "open" when an Explorer
+        // window is showing that folder (matched by window title, which Explorer sets to the
+        // folder name or full path).
+        if (Files.isDirectory(shortcutOrExePath)) {
+            return getOpenFolderWindows(shortcutOrExePath);
+        }
 
         // Web-app shortcuts (.lnk launching a browser with --app) all share the browser executable,
         // so they can't be matched by process path. Match them by browser window title instead.
@@ -74,6 +82,48 @@ public class NativeWindowUtils {
         }, null);
 
         return windows;
+    }
+
+    private static List<WindowInfo> getOpenFolderWindows(Path folderPath) {
+        List<WindowInfo> windows = new ArrayList<>();
+        Path leaf = folderPath.getFileName();
+        if (leaf == null) {
+            return windows;
+        }
+        final String leafName = leaf.toString().toLowerCase(Locale.ROOT);
+        final String fullPath = normalizePathString(folderPath).toLowerCase(Locale.ROOT);
+
+        User32.INSTANCE.EnumWindows((hWnd, arg1) -> {
+            if (User32.INSTANCE.IsWindowVisible(hWnd)) {
+                char[] buffer = new char[1024];
+                User32.INSTANCE.GetWindowText(hWnd, buffer, 1024);
+                String title = new String(buffer).trim();
+                if (!title.isEmpty() && isExplorerWindowForFolder(hWnd, leafName, fullPath, title)) {
+                    windows.add(new WindowInfo(hWnd, title));
+                }
+            }
+            return true;
+        }, null);
+
+        return windows;
+    }
+
+    // Explorer titles the window with the folder name ("Music"), folder name plus suffix
+    // ("Music - File Explorer") or the full path, depending on user settings.
+    private static boolean isExplorerWindowForFolder(HWND hWnd, String leafName, String fullPath, String title) {
+        String titleLower = title.toLowerCase(Locale.ROOT);
+        boolean titleMatches = titleLower.equals(leafName)
+                || titleLower.startsWith(leafName + " - ")
+                || titleLower.equals(fullPath)
+                || titleLower.startsWith(fullPath + " - ");
+        if (!titleMatches) {
+            return false;
+        }
+        Path processPath = getProcessImagePath(hWnd);
+        if (processPath == null || processPath.getFileName() == null) {
+            return false;
+        }
+        return processPath.getFileName().toString().equalsIgnoreCase("explorer.exe");
     }
 
     // Lowercased shortcut name (file name without .lnk) used to match browser window titles.

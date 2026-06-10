@@ -24,7 +24,6 @@ public class WindowPreviewPopup extends Popup {
 
     private final VBox container;
     private Node currentTarget;
-    private Node currentDock;
     // Reposition whenever popup size changes (content can grow/shrink).
     private final ChangeListener<Number> sizeListener = (obs, old, val) -> reposition();
 
@@ -171,9 +170,8 @@ public class WindowPreviewPopup extends Popup {
         return container;
     }
 
-    public void showAbove(Node target, Node dockContainer) {
+    public void showAbove(Node target) {
         this.currentTarget = target;
-        this.currentDock = dockContainer;
         Bounds bounds = target.localToScreen(target.getBoundsInLocal());
 
         // Initial show, then reposition to avoid flicker.
@@ -190,17 +188,18 @@ public class WindowPreviewPopup extends Popup {
 
         double w = getWidth();
         double h = getHeight();
-        double gap = 5;
+        double gap = 8;
 
         // Center horizontally over the target icon.
         setX(bounds.getMinX() + (bounds.getWidth() / 2) - (w / 2));
 
+        // Anchor to the hovered icon itself (not the whole dock) so multi-row docks
+        // show the popup next to the icon's own row.
         Rectangle2D screenBounds = getScreenBounds(bounds);
-        Bounds dockBounds = getDockBounds(bounds);
-        double yAbove = dockBounds.getMinY() - h - gap;
-        double yBelow = dockBounds.getMaxY() + gap;
+        double yAbove = bounds.getMinY() - h - gap;
+        double yBelow = bounds.getMaxY() + gap;
 
-        // If there's no room above the dock, place below instead.
+        // If there's no room above the icon, place below instead.
         if (yAbove < screenBounds.getMinY() + gap) {
             setY(yBelow);
         } else {
@@ -221,11 +220,4 @@ public class WindowPreviewPopup extends Popup {
         return Screen.getPrimary().getVisualBounds();
     }
 
-    private Bounds getDockBounds(Bounds fallbackBounds) {
-        if (currentDock == null) {
-            return fallbackBounds;
-        }
-        Bounds dockBounds = currentDock.localToScreen(currentDock.getBoundsInLocal());
-        return dockBounds != null ? dockBounds : fallbackBounds;
-    }
 }

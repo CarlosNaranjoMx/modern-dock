@@ -281,10 +281,20 @@ public class DockController {
             }
 
             ImageView imageView = createDockImageView(icon);
+            Circle runningIndicator = createRunningIndicator();
+            VBox graphic = createProgramGraphic(imageView, runningIndicator);
 
             Button button = new Button(buttonLabel);
             button.getStyleClass().add("dock-button");
-            button.setGraphic(imageView);
+            button.setGraphic(graphic);
+            // Folders join the running/not-running filter: they count as open while an
+            // Explorer window is showing them.
+            synchronized (programIndicators) {
+                programIndicators
+                        .computeIfAbsent(folderItem.getFolderPath(), ignored -> new ArrayList<>())
+                        .add(runningIndicator);
+            }
+            programButtons.put(button, folderItem.getFolderPath());
             button.setOnAction(e -> appServices.itemActionService().execute(item, this::openSettingsWindow));
             return button;
 
@@ -576,7 +586,7 @@ public class DockController {
                         dockTheme,
                         appServices.windowPreviewService()::activate
                 );
-                windowPreviewPopup.showAbove(button, dockContainer);
+                windowPreviewPopup.showAbove(button);
                 popupOwnerButton = button;
 
             } else if (windowPreviewPopup.isShowing() && popupOwnerButton == button) {
