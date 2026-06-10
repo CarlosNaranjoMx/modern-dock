@@ -105,6 +105,13 @@
                                     <Slider fx:id="spacingBetweenIconsSlider" majorTickUnit="5.0" max="30.0" showTickLabels="true" showTickMarks="true" />
                                  </children>
                               </VBox>
+                              <VBox spacing="14.0" styleClass="section-card">
+                                 <children>
+                                    <Label fx:id="maxIconsPerRowTitleLabel" styleClass="section-title" text="Max Icons Per Row" />
+                                    <Label fx:id="maxIconsPerRowHelperLabel" styleClass="section-helper" text="Icons beyond this limit wrap onto a new row below." wrapText="true" />
+                                    <Slider fx:id="maxIconsPerRowSlider" blockIncrement="1.0" majorTickUnit="5.0" max="40.0" min="1.0" minorTickCount="4" showTickLabels="true" showTickMarks="true" snapToTicks="true" />
+                                 </children>
+                              </VBox>
                            </children>
                         </VBox>
                      </content>

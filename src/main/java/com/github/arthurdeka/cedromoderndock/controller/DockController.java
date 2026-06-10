@@ -52,7 +52,7 @@ public class DockController {
     private AnchorPane rootPane;
 
     @FXML
-    private HBox hBoxContainer;
+    private VBox dockContainer;
 
     private AppServices appServices;
     private Stage stage;
@@ -73,12 +73,20 @@ public class DockController {
         return t;
     });
     private final Map<String, List<Circle>> programIndicators = new HashMap<>();
-    // Maps each rendered program button to its executable path, used by the 3-state filter.
+    // Maps each rendered program button to its executable path, used by the running/not-running filter.
     private final Map<Button, String> programButtons = new HashMap<>();
+    // All dock buttons in display order; applyFilter() lays the visible ones out into rows.
+    private final List<Button> orderedButtons = new ArrayList<>();
     // Latest known open/closed state per executable (updated by the open-state watcher, read on the FX thread).
     private volatile Map<String, Boolean> lastOpenStateByExecutable = new HashMap<>();
-    // Current dock filter; cycles all -> running only -> not-running only.
-    private DockFilterState filterState = DockFilterState.ALL;
+    // An app is only marked closed after this many consecutive polls without a match. Web apps like
+    // Telegram briefly change their window title on new messages, which would otherwise make the
+    // icon blink in and out of the filtered dock.
+    private static final int CLOSE_CONFIRMATION_POLLS = 3;
+    // Consecutive misses per executable; only touched from the single-threaded open-state executor.
+    private final Map<String, Integer> closeMissCounts = new HashMap<>();
+    // Current dock filter; the toggle switches between running only and not-running only.
+    private DockFilterState filterState = DockFilterState.RUNNING_ONLY;
     private final Rectangle dockClip = new Rectangle();
     // Monotonic id to ignore stale async results from previous hover requests.
     private int hoverRequestId = 0;
@@ -91,9 +99,9 @@ public class DockController {
     // Run when FXML is loaded
     public void handleInitialization() {
         appServices.localizationService().addListener(localizationListener);
-        dockClip.widthProperty().bind(hBoxContainer.widthProperty());
-        dockClip.heightProperty().bind(hBoxContainer.heightProperty());
-        hBoxContainer.setClip(dockClip);
+        dockClip.widthProperty().bind(dockContainer.widthProperty());
+        dockClip.heightProperty().bind(dockContainer.heightProperty());
+        dockContainer.setClip(dockClip);
 
         // Popup that lists open windows for a program icon on hover.
         windowPreviewPopup = new WindowPreviewPopup();
@@ -172,28 +180,29 @@ public class DockController {
     /* this method updates the DockView (actual rendered Dock) style and saves the changes */
     public void updateDockUI() {
         var dock = appServices.dockService().getDock();
-        hBoxContainer.getChildren().clear();
+        orderedButtons.clear();
+        dockContainer.getChildren().clear();
         synchronized (programIndicators) {
             programIndicators.clear();
         }
         programButtons.clear();
         dockClip.setArcWidth(dock.getDockBorderRounding() * 2.0);
         dockClip.setArcHeight(dock.getDockBorderRounding() * 2.0);
-        hBoxContainer.setSpacing(getDockIconsSpacing());
-        hBoxContainer.setStyle("-fx-background-color: rgba(" + dock.getDockColorRGB() + " " + dock.getDockTransparency() + ");" + "-fx-background-radius: " + dock.getDockBorderRounding() + ";");
+        dockContainer.setSpacing(getDockIconsSpacing());
+        dockContainer.setStyle("-fx-background-color: rgba(" + dock.getDockColorRGB() + " " + dock.getDockTransparency() + ");" + "-fx-background-radius: " + dock.getDockBorderRounding() + ";");
 
-        // Always-visible controls: cycle the 3-state filter, and toggle always-on-top.
-        hBoxContainer.getChildren().add(createFilterToggleButton());
-        hBoxContainer.getChildren().add(createAlwaysOnTopButton());
+        // Always-visible controls: toggle the running/not-running filter, and toggle always-on-top.
+        orderedButtons.add(createFilterToggleButton());
+        orderedButtons.add(createAlwaysOnTopButton());
 
         for (DockItem item : dock.getItems()) {
             Button button = createButton(item);
             if (button != null) {
-                hBoxContainer.getChildren().add(button);
+                orderedButtons.add(button);
             }
         }
 
-        // resize DockView window to account for DockItem additions or removing
+        // lays out the visible buttons into rows and resizes the DockView window
         applyFilter();
         requestProgramIndicatorRefresh();
     }
@@ -337,7 +346,7 @@ public class DockController {
         return runningIndicator;
     }
 
-    /* Builds the always-visible button that cycles the 3-state filter. */
+    /* Builds the always-visible button that toggles between running and not-running apps. */
     private Button createFilterToggleButton() {
         Button button = new Button();
         button.getStyleClass().add("dock-button");
@@ -357,39 +366,49 @@ public class DockController {
         dot.setStroke(Color.WHITE);
         dot.setStrokeWidth(1.5);
         dot.setMouseTransparent(true);
-        String tooltip;
-        switch (filterState) {
+        String tooltip = switch (filterState) {
             case RUNNING_ONLY -> {
                 dot.setFill(Color.LIMEGREEN);
-                tooltip = "Mostrando: solo apps en ejecución";
+                yield "Mostrando: apps en ejecución";
             }
             case NOT_RUNNING_ONLY -> {
                 dot.setFill(Color.TRANSPARENT);
-                tooltip = "Mostrando: solo apps cerradas";
+                yield "Mostrando: apps sin abrir";
             }
-            default -> {
-                dot.setFill(Color.web("#9aa0a6"));
-                tooltip = "Mostrando: todas las apps";
-            }
-        }
+        };
         button.setGraphic(dot);
         button.setTooltip(new Tooltip(tooltip));
     }
 
-    /* Shows/hides program buttons according to the active filter and the latest running state. */
+    /* Lays out the buttons that pass the active filter into rows of at most maxIconsPerRow icons. */
     private void applyFilter() {
         Map<String, Boolean> openState = lastOpenStateByExecutable;
-        for (Map.Entry<Button, String> entry : programButtons.entrySet()) {
-            Button button = entry.getKey();
-            boolean isOpen = openState.getOrDefault(entry.getValue(), false);
-            boolean visible = switch (filterState) {
-                case RUNNING_ONLY -> isOpen;
-                case NOT_RUNNING_ONLY -> !isOpen;
-                default -> true;
+        List<Button> visibleButtons = new ArrayList<>();
+        for (Button button : orderedButtons) {
+            String executablePath = programButtons.get(button);
+            // Non-program buttons (settings, controls, folders, modules) are always visible.
+            boolean visible = executablePath == null || switch (filterState) {
+                case RUNNING_ONLY -> openState.getOrDefault(executablePath, false);
+                case NOT_RUNNING_ONLY -> !openState.getOrDefault(executablePath, false);
             };
-            button.setVisible(visible);
-            button.setManaged(visible);
+            if (visible) {
+                visibleButtons.add(button);
+            }
         }
+
+        dockContainer.getChildren().clear();
+        int maxPerRow = Math.max(1, appServices.appearanceService().getMaxIconsPerRow());
+        HBox row = null;
+        for (Button button : visibleButtons) {
+            if (row == null || row.getChildren().size() >= maxPerRow) {
+                row = new HBox(getDockIconsSpacing());
+                row.setAlignment(Pos.CENTER_LEFT);
+                row.setFillHeight(false);
+                dockContainer.getChildren().add(row);
+            }
+            row.getChildren().add(button);
+        }
+
         // Collapse/expand the dock to fit the now-visible buttons.
         stage.sizeToScene();
         appServices.positioningService().applyPosition(stage);
@@ -425,12 +444,11 @@ public class DockController {
     }
 
     private enum DockFilterState {
-        ALL,
         RUNNING_ONLY,
         NOT_RUNNING_ONLY;
 
         DockFilterState next() {
-            return values()[(ordinal() + 1) % values().length];
+            return this == RUNNING_ONLY ? NOT_RUNNING_ONLY : RUNNING_ONLY;
         }
     }
 
@@ -459,9 +477,21 @@ public class DockController {
             return;
         }
 
+        Map<String, Boolean> previousState = lastOpenStateByExecutable;
         Map<String, Boolean> openStateByExecutable = new HashMap<>();
         for (String executablePath : indicatorSnapshot.keySet()) {
-            openStateByExecutable.put(executablePath, appServices.windowPreviewService().hasOpenWindows(executablePath));
+            boolean hasWindows = appServices.windowPreviewService().hasOpenWindows(executablePath);
+            boolean isOpen;
+            if (hasWindows) {
+                closeMissCounts.remove(executablePath);
+                isOpen = true;
+            } else {
+                // Keep an app marked open through transient misses (e.g. title changes on web apps)
+                // until enough consecutive polls confirm it is actually closed.
+                int misses = closeMissCounts.merge(executablePath, 1, Integer::sum);
+                isOpen = previousState.getOrDefault(executablePath, false) && misses < CLOSE_CONFIRMATION_POLLS;
+            }
+            openStateByExecutable.put(executablePath, isOpen);
         }
 
         Platform.runLater(() -> applyProgramIndicatorState(indicatorSnapshot, openStateByExecutable));
@@ -485,9 +515,11 @@ public class DockController {
                 indicator.setOpacity(isOpen ? 1 : 0);
             }
         }
+        boolean stateChanged = !openStateByExecutable.equals(lastOpenStateByExecutable);
         lastOpenStateByExecutable = openStateByExecutable;
-        // Keep the visible set in sync with the live running state while a filter is active.
-        if (filterState != DockFilterState.ALL) {
+        // Only re-layout when the running state actually changed, so the dock doesn't
+        // resize/reposition itself on every poll.
+        if (stateChanged) {
             applyFilter();
         }
     }
@@ -544,7 +576,7 @@ public class DockController {
                         dockTheme,
                         appServices.windowPreviewService()::activate
                 );
-                windowPreviewPopup.showAbove(button, hBoxContainer);
+                windowPreviewPopup.showAbove(button, dockContainer);
                 popupOwnerButton = button;
 
             } else if (windowPreviewPopup.isShowing() && popupOwnerButton == button) {

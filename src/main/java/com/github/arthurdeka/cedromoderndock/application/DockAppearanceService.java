@@ -31,6 +31,15 @@ public class DockAppearanceService {
         dockService.saveChanges();
     }
 
+    public int getMaxIconsPerRow() {
+        return getDock().getMaxIconsPerRow();
+    }
+
+    public void setMaxIconsPerRow(int maxIconsPerRow) {
+        getDock().setMaxIconsPerRow(maxIconsPerRow);
+        dockService.saveChanges();
+    }
+
     public int getDockTransparencyPercentage() {
         return (int) (getDock().getDockTransparency() * 100);
     }

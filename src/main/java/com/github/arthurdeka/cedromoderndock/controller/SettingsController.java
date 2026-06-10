@@ -142,6 +142,8 @@ public class SettingsController {
     @FXML
     private Slider spacingBetweenIconsSlider;
     @FXML
+    private Slider maxIconsPerRowSlider;
+    @FXML
     private Label iconsSizeTitleLabel;
     @FXML
     private Label iconsSizeHelperLabel;
@@ -149,6 +151,10 @@ public class SettingsController {
     private Label spacingTitleLabel;
     @FXML
     private Label spacingHelperLabel;
+    @FXML
+    private Label maxIconsPerRowTitleLabel;
+    @FXML
+    private Label maxIconsPerRowHelperLabel;
 
     @FXML
     private Slider dockTransparencySlider;
@@ -272,6 +278,9 @@ public class SettingsController {
 
         spacingBetweenIconsSlider.setValue(appServices.appearanceService().getSpacingBetweenIcons());
         spacingBetweenIconsSlider.valueProperty().addListener((observableValue, oldValue, newValue) -> handleSetIconsSpacingSlider((int) spacingBetweenIconsSlider.getValue()));
+
+        maxIconsPerRowSlider.setValue(appServices.appearanceService().getMaxIconsPerRow());
+        maxIconsPerRowSlider.valueProperty().addListener((observableValue, oldValue, newValue) -> handleSetMaxIconsPerRowSlider((int) Math.round(maxIconsPerRowSlider.getValue())));
 
         dockTransparencySlider.setValue(appServices.appearanceService().getDockTransparencyPercentage());
         dockTransparencySlider.valueProperty().addListener((observableValue, oldValue, newValue) -> handleSetDockTransparencySlider((int) dockTransparencySlider.getValue()));
@@ -699,6 +708,11 @@ public class SettingsController {
         dockRefreshAction.run();
     }
 
+    private void handleSetMaxIconsPerRowSlider(int value) {
+        appServices.appearanceService().setMaxIconsPerRow(Math.max(1, value));
+        dockRefreshAction.run();
+    }
+
     private void handleSetDockTransparencySlider(int value) {
         appServices.appearanceService().setDockTransparencyPercentage(value);
         dockRefreshAction.run();
@@ -795,6 +809,8 @@ public class SettingsController {
         iconsSizeHelperLabel.setText(text("settings.iconsCustomization.size.helper"));
         spacingTitleLabel.setText(text("settings.iconsCustomization.spacing.title"));
         spacingHelperLabel.setText(text("settings.iconsCustomization.spacing.helper"));
+        maxIconsPerRowTitleLabel.setText(text("settings.iconsCustomization.maxPerRow.title"));
+        maxIconsPerRowHelperLabel.setText(text("settings.iconsCustomization.maxPerRow.helper"));
 
         transparencyTitleLabel.setText(text("settings.dockCustomization.transparency.title"));
         transparencyHelperLabel.setText(text("settings.dockCustomization.transparency.helper"));

@@ -14,6 +14,10 @@ public class DockModel {
     private List<DockItem> items = new ArrayList<>();
     private int iconsSize = 24;
     private int spacingBetweenIcons = 0;
+    // Max icons shown per horizontal row; items beyond the limit wrap to the next row.
+    @Getter
+    @Setter
+    private int maxIconsPerRow = 10;
     private double dockTransparency = 0.3;
     @Setter
     @Getter

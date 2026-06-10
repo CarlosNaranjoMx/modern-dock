@@ -29,12 +29,28 @@ public class NativeWindowUtils {
         }
 
         // Normalize the target executable path so comparisons are stable.
-        final Path targetPath = Paths.get(executablePath).toAbsolutePath().normalize();
+        final Path shortcutOrExePath = Paths.get(executablePath).toAbsolutePath().normalize();
 
         // Web-app shortcuts (.lnk launching a browser with --app) all share the browser executable,
         // so they can't be matched by process path. Match them by browser window title instead.
-        final boolean isShortcut = executablePath.toLowerCase(Locale.ROOT).endsWith(".lnk");
-        final String shortcutName = isShortcut ? shortcutMatchName(targetPath) : null;
+        // Shortcuts to regular programs (e.g. Steam.lnk) are resolved to their target executable
+        // and matched by process path like any other program.
+        boolean matchByTitle = false;
+        Path resolvedTarget = shortcutOrExePath;
+        if (executablePath.toLowerCase(Locale.ROOT).endsWith(".lnk")) {
+            ShortcutResolver.ShortcutTarget shortcutTarget = ShortcutResolver.resolve(shortcutOrExePath);
+            boolean isWebApp = shortcutTarget != null
+                    && isBrowserExecutable(shortcutTarget.targetPath())
+                    && shortcutTarget.arguments().contains("--app");
+            if (shortcutTarget != null && !isWebApp && !shortcutTarget.targetPath().isEmpty()) {
+                resolvedTarget = Paths.get(shortcutTarget.targetPath()).toAbsolutePath().normalize();
+            } else {
+                matchByTitle = true;
+            }
+        }
+        final boolean isTitleMatch = matchByTitle;
+        final String shortcutName = matchByTitle ? shortcutMatchName(shortcutOrExePath) : null;
+        final Path targetPath = resolvedTarget;
 
         User32.INSTANCE.EnumWindows((hWnd, arg1) -> {
             if (User32.INSTANCE.IsWindowVisible(hWnd)) {
@@ -47,7 +63,7 @@ public class NativeWindowUtils {
                     return true;
                 }
 
-                boolean matches = isShortcut
+                boolean matches = isTitleMatch
                         ? isBrowserWindowWithTitle(hWnd, shortcutName, title)
                         : isWindowFromExecutable(hWnd, targetPath);
                 if (matches) {
@@ -76,6 +92,14 @@ public class NativeWindowUtils {
         return name.length() >= 2 ? name : null;
     }
 
+    private static boolean isBrowserExecutable(String executablePath) {
+        if (executablePath == null || executablePath.isEmpty()) {
+            return false;
+        }
+        Path fileName = Paths.get(executablePath).getFileName();
+        return fileName != null && BROWSER_EXECUTABLES.contains(fileName.toString().toLowerCase(Locale.ROOT));
+    }
+
     private static boolean isBrowserWindowWithTitle(HWND hWnd, String shortcutName, String title) {
         if (shortcutName == null) {
             return false;
@@ -92,8 +116,42 @@ public class NativeWindowUtils {
 
     private static boolean isWindowFromExecutable(HWND hWnd, Path targetPath) {
         Path processPath = getProcessImagePath(hWnd);
+        if (processPath == null) {
+            return false;
+        }
         // Prefer full path match, but fall back to filename match for edge cases.
-        return processPath != null && isSameExecutable(processPath, targetPath);
+        return isSameExecutable(processPath, targetPath) || isHelperProcessWindow(processPath, targetPath);
+    }
+
+    // Some apps render their windows from helper processes (e.g. Steam's windows belong to
+    // steamwebhelper.exe, not steam.exe). Match a window when its process lives under the target's
+    // install directory AND its name starts with the target's base name, so unrelated programs
+    // that merely share a folder (e.g. WINWORD next to POWERPNT) don't cross-match.
+    private static boolean isHelperProcessWindow(Path processPath, Path targetPath) {
+        Path installDir = targetPath.getParent();
+        Path processFile = processPath.getFileName();
+        Path targetFile = targetPath.getFileName();
+        if (installDir == null || processFile == null || targetFile == null) {
+            return false;
+        }
+
+        String targetBaseName = stripExeExtension(targetFile.toString());
+        if (targetBaseName.length() < 3) {
+            return false;
+        }
+        String processBaseName = stripExeExtension(processFile.toString());
+        if (!processBaseName.toLowerCase(Locale.ROOT).startsWith(targetBaseName.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+
+        String installDirStr = normalizePathString(installDir) + "\\";
+        String processStr = normalizePathString(processPath);
+        return processStr.regionMatches(true, 0, installDirStr, 0, installDirStr.length());
+    }
+
+    private static String stripExeExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     // Returns the normalized image path of the process that owns the given window, or null.
